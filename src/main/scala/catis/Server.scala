@@ -14,22 +14,21 @@
  * limitations under the License.
  */
 
-name := "catis"
+package catis
 
-ThisBuild / baseVersion := "0.1"
+import cats.effect.{IO, IOApp}
 
-ThisBuild / organization := "com.codecommit"
-ThisBuild / publishGithubUser := "djspiewak"
-ThisBuild / publishFullName := "Daniel Spiewak"
+import com.comcast.ip4s._
 
-ThisBuild / crossScalaVersions := Seq("2.13.7")
+import fs2.Stream
+import fs2.io.net.Network
 
-val Fs2Version = "3.2.3"
+object Server extends IOApp.Simple {
+  val run = {
+    val stream = Network[IO].server(port = Some(port"6379")) map { client =>
+      Stream.empty
+    }
 
-libraryDependencies ++= Seq(
-  "org.typelevel" %% "cats-effect" % "3.3.1",
-  "org.scodec"    %% "scodec-core" % "1.11.9",
-  "co.fs2"        %% "fs2-io"      % Fs2Version,
-  "co.fs2"        %% "fs2-scodec"  % Fs2Version,
-
-  "org.typelevel" %% "cats-effect-testing-specs2" % "1.4.0" % Test)
+    stream.parJoin(1024).compile.resource.drain.useForever
+  }
+}
