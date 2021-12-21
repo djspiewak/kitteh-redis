@@ -34,6 +34,7 @@ object Error {
   sealed trait Eval extends Error
 
   object Eval {
-
+    final case class UnknownKey(key: String) extends Eval
+    final case class AlreadySubscribed(channels: List[String]) extends Eval
   }
 }

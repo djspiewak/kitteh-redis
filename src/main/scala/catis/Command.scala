@@ -75,6 +75,7 @@ object Command {
   }
 
   final case class Ping(msg: Option[String]) extends Command
+
   final case class Get(key: String) extends Command
   final case class Set(key: String, value: ByteVector) extends Command
 
