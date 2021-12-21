@@ -20,29 +20,59 @@ import scodec.Codec
 import scodec.bits.{BitVector, ByteVector}
 import scodec.codecs._
 
+sealed trait RESP extends Product with Serializable
+
 // note this is rather naive and we can do a lot better with some shenanigans
 object RESP {
 
-  private val asciiInt: Codec[Int] = ascii.xmap(_.toInt, _.toString)
+  private val asciiInt: Codec[scala.Int] = ascii.xmap(_.toInt, _.toString)
+  private val crlf = BitVector('\r', '\n')
+  private val delimInt: Codec[scala.Int] = crlfTerm(asciiInt)
 
-  val int: Codec[Int] = constant(BitVector(':')) ~> crlfTerm(asciiInt)
+  lazy val codec: Codec[RESP] =
+    discriminated[RESP].by(byte)
+      .typecase('+', crlfTerm(utf8).as[String.Simple])
+      .typecase('-', crlfTerm(utf8).as[String.Error])
+      .typecase(':', delimInt.as[Int])
+      .typecase('$', bulk)
+      .typecase('*', array)
 
-  object string {
-    val simple: Codec[String] = constant(BitVector('+')) ~> crlfTerm(utf8)
-    val error: Codec[String] = constant(BitVector('-')) ~> crlfTerm(utf8)
+  val bulk: Codec[String.Bulk] =
+    discriminated[String.Bulk].by(lookahead(constant('-')))
+      .typecase(true, constant('-', '1', '\r', '\n').xmap[String.Bulk.Nil.type](_ => String.Bulk.Nil, _ => ()))
+      .typecase(false, (variableSizeBytes(delimInt, bytes) <~ constant(crlf)).as[String.Bulk.Full])
 
-    val bulk: Codec[ByteVector] =
-      constant(BitVector('$')) ~> variableSizeBytes(crlfTerm(asciiInt), bytes) <~ constant(crlf)
-
-    val nil: Codec[Unit] = constant(BitVector('$', '-', '1', '\r', '\n'))
-  }
-
-  def array[A](inner: Codec[A]): Codec[List[A]] =
-    constant(BitVector('*')) ~> variableSizeBytes(crlfTerm(asciiInt), list(inner))
-
-  val nilArray: Codec[Unit] = constant(BitVector('*', '-', '1', '\r', '\n'))
+  lazy val array: Codec[Array] =
+    discriminated[Array].by(lookahead(constant('-')))
+      .typecase(true, constant('-', '1', '\r', '\n').xmap[Array.Nil.type](_ => Array.Nil, _ => ()))
+      .typecase(false, listOfN(delimInt, crlfTerm(lazily(codec))).as[Array.Full])
 
   private def crlfTerm[A](inner: Codec[A]): Codec[A] = variableSizeDelimited(constant(crlf), inner)
 
-  private val crlf = BitVector('\r', '\n')
+  final case class Int(value: scala.Int) extends RESP
+
+  object String {
+    final case class Simple(value: java.lang.String) extends RESP
+    final case class Error(value: java.lang.String) extends RESP
+
+    sealed trait Bulk extends RESP
+
+    object Bulk {
+
+      object Ascii {
+        def apply(str: String): Full = Full(ByteVector.encodeAscii(str).toOption.get)
+        def unapply(contents: ByteVector): Option[String] = contents.decodeAscii.toOption
+      }
+
+      final case class Full(contents: ByteVector) extends Bulk
+      case object Nil extends Bulk
+    }
+  }
+
+  sealed trait Array extends RESP
+
+  object Array {
+    final case class Full(contents: List[RESP]) extends Array
+    case object Nil extends Array
+  }
 }
