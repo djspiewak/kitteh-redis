@@ -145,6 +145,51 @@ object Server extends IOApp.Simple {
             Stream.eval(eff).flatten
           }
         }
+
+      case Unsubscribe(channels) =>
+        val toRemove = if (channels.isEmpty) {
+          state modify { st =>
+            (st.copy(subscriptions = Map()), st.subscriptions)
+          }
+        } else {
+          state modify { st =>
+            val (subset, subs2) = channels.foldLeft((Map[String, F[Unit]](), st.subscriptions)) {
+              case ((acc, subs), ch) =>
+                subs.get(ch) match {
+                  case Some(act) => (acc + (ch -> act), subs - ch)
+                  case None => (acc, subs)
+                }
+            }
+
+            (st.copy(subscriptions = subs2), subset)
+          }
+        }
+
+        val unsubbed = Stream evals {
+          toRemove flatMap { subs =>
+            subs.values.toSeq.sequence_.as(subs.keys.toList)
+          }
+        }
+
+        unsubbed.map(ch => Right(RESP.String.Simple(ch)))
+
+      case Publish(channel, message) =>
+        val back = Stream eval {
+          world.get map { w =>
+            w.pubsub.get(channel) match {
+              case Some(t) =>
+                // TODO cheating!
+                t.subscribers.take(1) flatMap { num =>
+                  Stream.eval(t.publish1(message)).as(Right(RESP.Int(num)))
+                }
+
+              case None =>
+                Stream.emit(Left(Error.Eval.UnknownChannel(channel)))
+            }
+          }
+        }
+
+        back.flatten
     }
   }
 
