@@ -22,52 +22,55 @@ sealed trait Command extends Product with Serializable
 
 object Command {
 
-  def parse(in: List[RESP]): Either[ParseError, Command] = {
+  def parse(in: RESP.Array): Either[Error.Parse, Command] = {
     import RESP._
 
     in match {
-      case String.Bulk.Ascii("PING") :: String.Bulk.Ascii(contents) :: Nil =>
+      case RESP.Array.Full(String.Bulk.Ascii("PING") :: String.Bulk.Ascii(contents) :: Nil) =>
         Right(Ping(Some(contents)))
 
-      case String.Bulk.Ascii("PING") :: Nil =>
+      case RESP.Array.Full(String.Bulk.Ascii("PING") :: Nil) =>
         Right(Ping(None))
 
-      case String.Bulk.Ascii("GET") :: String.Bulk.Ascii(key) :: Nil =>
+      case RESP.Array.Full(String.Bulk.Ascii("GET") :: String.Bulk.Ascii(key) :: Nil) =>
         Right(Get(key))
 
-      case String.Bulk.Ascii("SET") :: String.Bulk.Ascii(key) :: String.Bulk.Full(value) :: Nil =>
+      case RESP.Array.Full(String.Bulk.Ascii("SET") :: String.Bulk.Ascii(key) :: String.Bulk.Full(value) :: Nil) =>
         Right(Set(key, value))
 
-      case String.Bulk.Ascii("SUBSCRIBE") :: channels0 =>
+      case RESP.Array.Full(String.Bulk.Ascii("SUBSCRIBE") :: channels0) =>
         val channels = channels0 collect {
           case String.Bulk.Ascii(name) => name
         }
 
         if (channels.length != channels0.length)
-          Left(ParseError.UnrecognizedChannelToken(channels0))
+          Left(Error.Parse.UnrecognizedChannelToken(channels0))
         else if (channels.isEmpty)
-          Left(ParseError.EmptySubscription)
+          Left(Error.Parse.EmptySubscription)
         else
           Right(Subscribe(channels))
 
-      case String.Bulk.Ascii("UNSUBSCRIBE") :: channels0 =>
+      case RESP.Array.Full(String.Bulk.Ascii("UNSUBSCRIBE") :: channels0) =>
         val channels = channels0 collect {
           case String.Bulk.Ascii(name) => name
         }
 
         if (channels.length != channels0.length)
-          Left(ParseError.UnrecognizedChannelToken(channels0))
+          Left(Error.Parse.UnrecognizedChannelToken(channels0))
         else
           Right(Unsubscribe(channels))
 
-      case String.Bulk.Ascii("PUBLISH") :: String.Bulk.Ascii(channel) :: String.Bulk.Full(message) :: Nil =>
+      case RESP.Array.Full(String.Bulk.Ascii("PUBLISH") :: String.Bulk.Ascii(channel) :: String.Bulk.Full(message) :: Nil) =>
         Right(Publish(channel, message))
 
-      case String.Bulk.Ascii(cmd) :: _ =>
-        Left(ParseError.UnrecognizedCommand(cmd))
+      case RESP.Array.Full(String.Bulk.Ascii(cmd) :: _) =>
+        Left(Error.Parse.UnrecognizedCommand(cmd))
 
-      case other =>
-        Left(ParseError.UnparseableSequence(other))
+      case RESP.Array.Full(other) =>
+        Left(Error.Parse.UnparseableSequence(other))
+
+      case RESP.Array.Nil =>
+        Left(Error.Parse.NilCommandArray)
     }
   }
 
@@ -78,14 +81,4 @@ object Command {
   final case class Subscribe(channels: List[String]) extends Command
   final case class Unsubscribe(channels: List[String]) extends Command
   final case class Publish(channel: String, message: ByteVector) extends Command
-
-  sealed trait ParseError extends Product with Serializable
-
-  object ParseError {
-    final case class UnrecognizedCommand(cmd: String) extends ParseError
-    final case class UnparseableSequence(in: List[RESP]) extends ParseError
-
-    final case class UnrecognizedChannelToken(tokens: List[RESP]) extends ParseError
-    case object EmptySubscription extends ParseError
-  }
 }
