@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package catis
+package kitteh
 
 import scodec.bits.ByteVector
 

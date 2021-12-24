@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package catis
+package kitteh
 
 import cats.effect.{Concurrent, Deferred, IO, IOApp, Ref}
 import cats.syntax.all._

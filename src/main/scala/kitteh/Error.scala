@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package catis
+package kitteh
 
 sealed trait Error extends Product with Serializable
 

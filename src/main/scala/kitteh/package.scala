@@ -14,4 +14,4 @@
  * limitations under the License.
  */
 
-package object catis
+package object kitteh

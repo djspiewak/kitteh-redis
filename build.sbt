@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-name := "catis"
+name := "kitteh-redis"
 
 ThisBuild / baseVersion := "0.1"
 
