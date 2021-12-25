@@ -25,7 +25,67 @@ import scodec.bits.{BitVector, ByteVector}
 class RESPSpec extends Specification {
 
   "encoding" >> {
-    ok
+    "ints" >> {
+      "positive" >> {
+        RESP.Int(24) must encodeAs(":24\r\n")
+      }
+
+      "long" >> {
+        RESP.Int(987654321) must encodeAs(":987654321\r\n")
+      }
+
+      "negative" >> {
+        RESP.Int(-42) must encodeAs(":-42\r\n")
+      }
+    }
+
+    "strings" >> {
+      "simple" >> {
+        "ascii" >> {
+          RESP.String.Simple("hello") must encodeAs("+hello\r\n")
+        }
+
+        "utf8" >> {
+          RESP.String.Simple("🐈‍⬛") must encodeAs("+🐈‍⬛\r\n")
+        }
+      }
+
+      "error" >> {
+        "ascii" >> {
+          RESP.String.Error("hello") must encodeAs("-hello\r\n")
+        }
+
+        "utf8" >> {
+          RESP.String.Error("🐈‍⬛") must encodeAs("-🐈‍⬛\r\n")
+        }
+      }
+
+      "bulk" >> {
+        "full" >> {
+          val contents = "there's a lot of bytes which need to go here"
+          RESP.String.Bulk.Full(ByteVector(contents.getBytes)) must encodeAs(s"$$${contents.length}\r\n$contents\r\n")
+        }
+
+        "nil" >> {
+          RESP.String.Bulk.Nil must encodeAs("$-1\r\n")
+        }
+      }
+    }
+
+    "array" >> {
+      "several ints" >> {
+        RESP.Array.Full(List(RESP.Int(1), RESP.Int(2), RESP.Int(3))) must encodeAs("*3\r\n:1\r\n:2\r\n:3\r\n\r\n")
+      }
+
+      "nested array" >> {
+        RESP.Array.Full(List(RESP.Array.Full(List(RESP.String.Simple("hi"), RESP.String.Simple("there"))))) must encodeAs(
+          "*1\r\n*2\r\n+hi\r\n+there\r\n\r\n\r\n")
+      }
+
+      "nil" >> {
+        RESP.Array.Nil must encodeAs("*-1\r\n")
+      }
+    }
   }
 
   "decoding" >> {
@@ -96,5 +156,14 @@ class RESPSpec extends Specification {
     val result = RESP.codec.decode(BitVector(str.getBytes))
     val test = result == Attempt.successful(DecodeResult(resp, BitVector.empty))
     (test, s"$str decoded to $resp", s"$str decoded to $result; expected $resp")
+  }
+
+  private def encodeAs(str: String): Matcher[RESP] = { (resp: RESP) =>
+    val result = RESP.codec.encode(resp)
+    result match {
+      case Attempt.Successful(bv) => println(bv.decodeAscii)
+    }
+    val test = result == Attempt.successful(BitVector(str.getBytes))
+    (test, s"$resp encoded to $str", s"$resp encoded to $result; expected $str")
   }
 }
