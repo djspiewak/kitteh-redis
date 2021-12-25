@@ -82,7 +82,15 @@ object RESP {
 
       object Ascii {
         def apply(str: java.lang.String): Full = Full(ByteVector.encodeAscii(str).toOption.get)
-        def unapply(contents: ByteVector): Option[java.lang.String] = contents.decodeAscii.toOption
+
+        def unapply(resp: RESP): Option[java.lang.String] =
+          resp match {
+            case RESP.String.Bulk.Full(contents) =>
+              contents.decodeAscii.toOption
+
+            case _ =>
+              None
+          }
       }
 
       final case class Full(contents: ByteVector) extends Bulk
