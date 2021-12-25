@@ -160,9 +160,7 @@ class RESPSpec extends Specification {
 
   private def encodeAs(str: String): Matcher[RESP] = { (resp: RESP) =>
     val result = RESP.codec.encode(resp)
-    result match {
-      case Attempt.Successful(bv) => println(bv.decodeAscii)
-    }
+    // println(result)
     val test = result == Attempt.successful(BitVector(str.getBytes))
     (test, s"$resp encoded to $str", s"$resp encoded to $result; expected $str")
   }
