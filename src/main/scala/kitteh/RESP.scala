@@ -37,7 +37,7 @@ object RESP {
       .typecase('$', bulk)
       .typecase('*', array)
 
-  val bulk: Codec[String.Bulk] =
+  lazy val bulk: Codec[String.Bulk] =
     discriminated[String.Bulk].by(lookahead(constant('-')))
       .typecase(true, constant('-', '1', '\r', '\n').xmap[String.Bulk.Nil.type](_ => String.Bulk.Nil, _ => ()))
       .typecase(false, (variableSizeBytes(delimInt, bytes) <~ constant(crlf)).as[String.Bulk.Full])
@@ -45,9 +45,28 @@ object RESP {
   lazy val array: Codec[Array] =
     discriminated[Array].by(lookahead(constant('-')))
       .typecase(true, constant('-', '1', '\r', '\n').xmap[Array.Nil.type](_ => Array.Nil, _ => ()))
-      .typecase(false, listOfN(delimInt, crlfTerm(lazily(codec))).as[Array.Full])
+      .typecase(false, listOfN(delimInt, lazily(codec)).as[Array.Full] <~ constant(crlf))
 
-  private def crlfTerm[A](inner: Codec[A]): Codec[A] = variableSizeDelimited(constant(crlf), inner)
+  private def crlfTerm[A](inner: Codec[A]): Codec[A] =
+    Codec(
+      inner.encode(_).map(_ ++ crlf),
+      { bits =>
+        val bytes = bits.bytes
+
+        var i = 0L
+        var done = false
+        while (i < bytes.size - 1 && !done) {
+          if (bytes(i) == '\r' && bytes(i + 1) == '\n')
+            done = true
+          else
+            i += 1
+        }
+
+        val (front, back) = bytes.splitAt(i)
+        // println(s"bits = $bits; bits.decodeAscii = ${bits.decodeAscii}; front = ${front.decodeAscii}; i = $i")
+
+        inner.decode(front.bits).map(_.copy(remainder = back.drop(2).bits))
+      })
 
   final case class Int(value: scala.Int) extends RESP
 
