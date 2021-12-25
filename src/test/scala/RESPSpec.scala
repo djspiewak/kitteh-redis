@@ -16,13 +16,16 @@
 
 package kitteh
 
+import org.scalacheck.{Arbitrary, Gen}
+
+import org.specs2.ScalaCheck
 import org.specs2.matcher.Matcher
 import org.specs2.mutable.Specification
 
 import scodec.{Attempt, DecodeResult}
 import scodec.bits.{BitVector, ByteVector}
 
-class RESPSpec extends Specification {
+class RESPSpec extends Specification with ScalaCheck {
 
   "encoding" >> {
     "ints" >> {
@@ -150,6 +153,59 @@ class RESPSpec extends Specification {
         "*-1\r\n" must decodeAs(RESP.Array.Nil)
       }
     }
+  }
+
+  "round-trip" >> prop { (expected: RESP) =>
+    RESP.codec.encode(expected) must beLike {
+      case Attempt.Successful(bits) =>
+        RESP.codec.decode(bits) must beLike {
+          case Attempt.Successful(DecodeResult(result, remainder)) =>
+            remainder.isEmpty must beTrue
+            result mustEqual expected
+        }
+    }
+  }
+
+  private implicit def arbitraryRESP: Arbitrary[RESP] = {
+    import Arbitrary.arbitrary
+
+    def genResp(depth: Int): Gen[RESP] =
+      Gen.oneOf(genInt, genString, genArray(depth))
+
+    def genInt: Gen[RESP.Int] =
+      arbitrary[Int].filter(_ != Int.MinValue).map(i => RESP.Int(i.abs))
+
+    def genString: Gen[RESP.String] =
+      Gen.oneOf(genStringSimple, genStringError, genStringBulk)
+
+    def genStringSimple: Gen[RESP.String.Simple] =
+      arbitrary[String].map(RESP.String.Simple(_))
+
+    def genStringError: Gen[RESP.String.Error] =
+      arbitrary[String].map(RESP.String.Error(_))
+
+    def genStringBulk: Gen[RESP.String.Bulk] =
+      Gen.oneOf(genStringBulkFull, genStringBulkNil)
+
+    def genStringBulkFull: Gen[RESP.String.Bulk.Full] =
+      arbitrary[Array[Byte]].map(ByteVector(_)).map(RESP.String.Bulk.Full(_))
+
+    def genStringBulkNil: Gen[RESP.String.Bulk.Nil.type] =
+      Gen.const(RESP.String.Bulk.Nil)
+
+    def genArray(depth: Int): Gen[RESP.Array] =
+      Gen.oneOf(genArrayFull(depth), genArrayNil)
+
+    def genArrayFull(depth: Int): Gen[RESP.Array.Full] =
+      if (depth <= 0)
+        Gen.const(RESP.Array.Full(Nil))
+      else
+        Gen.listOf(genResp(depth - 1)).map(RESP.Array.Full(_))
+
+    def genArrayNil: Gen[RESP.Array.Nil.type] =
+      Gen.const(RESP.Array.Nil)
+
+    Arbitrary(genResp(4))
   }
 
   private def decodeAs(resp: RESP): Matcher[String] = { (str: String) =>

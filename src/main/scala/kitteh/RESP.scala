@@ -70,17 +70,19 @@ object RESP {
 
   final case class Int(value: scala.Int) extends RESP
 
-  object String {
-    final case class Simple(value: java.lang.String) extends RESP
-    final case class Error(value: java.lang.String) extends RESP
+  sealed trait String extends RESP
 
-    sealed trait Bulk extends RESP
+  object String {
+    final case class Simple(value: java.lang.String) extends String
+    final case class Error(value: java.lang.String) extends String
+
+    sealed trait Bulk extends String
 
     object Bulk {
 
       object Ascii {
-        def apply(str: String): Full = Full(ByteVector.encodeAscii(str).toOption.get)
-        def unapply(contents: ByteVector): Option[String] = contents.decodeAscii.toOption
+        def apply(str: java.lang.String): Full = Full(ByteVector.encodeAscii(str).toOption.get)
+        def unapply(contents: ByteVector): Option[java.lang.String] = contents.decodeAscii.toOption
       }
 
       final case class Full(contents: ByteVector) extends Bulk

@@ -32,4 +32,5 @@ libraryDependencies ++= Seq(
   "co.fs2"        %% "fs2-io"      % Fs2Version,
   "co.fs2"        %% "fs2-scodec"  % Fs2Version,
 
-  "org.typelevel" %% "cats-effect-testing-specs2" % "1.4.0" % Test)
+  "org.typelevel" %% "cats-effect-testing-specs2" % "1.4.0"  % Test,
+  "org.specs2"    %% "specs2-scalacheck"          % "4.13.1" % Test)
