@@ -40,11 +40,11 @@ object Server extends IOApp.Simple {
     val decoder = StreamDecoder.many(RESP.array).toPipeByte[IO]
 
     // in the beginning we have no data and no pubsub topics
-    val makeWorld = IO.ref(World[IO, String, ByteVector](Map(), Map()))
+    val makeWorld = IO.ref(World.empty[IO, String, ByteVector])
 
     val stream = Stream.eval(makeWorld) flatMap { world =>
       Network[IO].server(port = Some(port"6379")) map { client =>
-        Stream.eval(IO.ref(State[IO, String](Map()))) flatMap { state =>
+        Stream.eval(IO.ref(State.empty[IO, String])) flatMap { state =>
           val resp = client.reads.through(decoder)
           val commands = resp.map(Command.parse(_))
 
@@ -194,5 +194,14 @@ object Server extends IOApp.Simple {
   }
 
   final case class World[F[_], A, B](data: Map[A, B], pubsub: Map[A, Topic[F, B]])
+
+  object World {
+    def empty[F[_], A, B]: World[F, A, B] = World(Map(), Map())
+  }
+
   final case class State[F[_], A](subscriptions: Map[A, F[Unit]])
+
+  object State {
+    def empty[F[_], A]: State[F, A] = State(Map())
+  }
 }
