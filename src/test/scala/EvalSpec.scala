@@ -16,7 +16,7 @@
 
 package kitteh
 
-import cats.effect.{IO, Resource}
+import cats.effect.{IO, Ref, Resource}
 import cats.effect.testing.specs2.CatsEffect
 import cats.syntax.all._
 
@@ -202,6 +202,13 @@ class EvalSpec extends Specification with CatsEffect {
       }
     }
   }
+
+  private def eval(
+      command: Command,
+      worldR: Ref[IO, World[IO, String, ByteVector]],
+      stateR: Ref[IO, State[IO, String]])
+      : Stream[IO, Either[Error.Eval, RESP]] =
+    new Server[IO](worldR).eval(command, stateR)
 
   private def evalEmpty(command: Command): IO[Either[Error.Eval, List[RESP]]] = {
     val results = for {

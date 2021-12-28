@@ -16,7 +16,7 @@
 
 package kitteh
 
-import cats.effect.{Concurrent, Deferred, IO, IOApp, Ref}
+import cats.effect.{Concurrent, Deferred, Ref, Resource}
 import cats.syntax.all._
 import cats.conversions.all._
 
@@ -29,46 +29,13 @@ import fs2.io.net.Network
 
 import scodec.bits.ByteVector
 
-object Server extends IOApp.Simple {
+final class Server[F[_]: Concurrent] private[kitteh] (world: Ref[F, Server.World[F, String, ByteVector]]) {
+  import Server.{State, World}
 
-  val MaxConcurrents = 1024
-  val MaxPipelines = 1024
-  val MaxOutstanding = 1024
+  private val MaxOutstanding = 1024
 
-  val run = {
-    val encoder = StreamEncoder.many(RESP.codec).toPipeByte[IO]
-    val decoder = StreamDecoder.many(RESP.array).toPipeByte[IO]
-
-    // in the beginning we have no data and no pubsub topics
-    val makeWorld = IO.ref(World.empty[IO, String, ByteVector])
-
-    val stream = Stream.eval(makeWorld) flatMap { world =>
-      Network[IO].server(port = Some(port"6379")) map { client =>
-        Stream.eval(IO.ref(State.empty[IO, String])) flatMap { state =>
-          val resp = client.reads.through(decoder)
-          val commands = resp.map(Command.parse(_))
-
-          val pipelines = commands.map(_.traverse(eval[IO](_, world, state)).map(_.flatten[Error, RESP]))
-
-          val results = pipelines.parJoin(MaxPipelines)
-
-          val submerged = results map {
-            case Left(err) => RESP.String.Error(err.toString)   // TODO
-            case Right(resp) => resp
-          }
-
-          // TODO logging
-          submerged.through(encoder).through(client.writes).drain.handleErrorWith(_ => Stream.empty)
-        }
-      }
-    }
-
-    stream.parJoin(MaxConcurrents).compile.resource.drain.useForever
-  }
-
-  def eval[F[_]: Concurrent](
+  def eval(
       cmd: Command,
-      world: Ref[F, World[F, String, ByteVector]],
       state: Ref[F, State[F, String]])
       : Stream[F, Either[Error.Eval, RESP]] = {
     import Command._
@@ -190,6 +157,42 @@ object Server extends IOApp.Simple {
         }
 
         back.flatten
+    }
+  }
+}
+
+object Server {
+
+  private val MaxConcurrents = 1024
+  private val MaxPipelines = 1024
+
+  def apply[F[_]: Concurrent: Network]: Resource[F, Server[F]] = {
+    val encoder = StreamEncoder.many(RESP.codec).toPipeByte[F]
+    val decoder = StreamDecoder.many(RESP.array).toPipeByte[F]
+
+    // in the beginning we have no data and no pubsub topics
+    Resource.eval(Concurrent[F].ref(World.empty[F, String, ByteVector])) flatMap { world =>
+      val server = new Server(world)
+      val stream = Network[F].server(port = Some(port"6379")) map { client =>
+        Stream.eval(Concurrent[F].ref(State.empty[F, String])) flatMap { state =>
+          val resp = client.reads.through(decoder)
+          val commands = resp.map(Command.parse(_))
+
+          val pipelines = commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
+
+          val results = pipelines.parJoin(MaxPipelines)
+
+          val submerged = results map {
+            case Left(err) => RESP.String.Error(err.toString)   // TODO
+            case Right(resp) => resp
+          }
+
+          // TODO logging
+          submerged.through(encoder).through(client.writes).drain.handleErrorWith(_ => Stream.empty)
+        }
+      }
+
+      Stream.emit(server).concurrently(stream.parJoin(MaxConcurrents)).compile.resource.lastOrError
     }
   }
 
