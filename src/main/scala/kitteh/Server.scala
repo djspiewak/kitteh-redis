@@ -34,6 +34,7 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import scodec.bits.ByteVector
 
 final class Server[F[_]: Concurrent: Logger] private[kitteh] (
+    val port: Port,
     world: Ref[F, Server.World[F, String, ByteVector]]) {
 
   import Server.{State, World}
@@ -220,13 +221,14 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
 object Server {
 
-  private val DefaultPort = port"6379"
+  val DefaultPort = port"6379"
+
   private val DefaultMaxConcurrents = 10000      // match Redis defaults
   private val DefaultMaxPipelines = 1024
 
   def apply[F[_]: Async: Network](
       host: Host,
-      port: Port = DefaultPort,
+      port: Option[Port] = Some(DefaultPort),
       maxPipelines: Int = DefaultMaxPipelines,
       maxConcurrents: Int = DefaultMaxConcurrents)
       : Resource[F, Server[F]] = {
@@ -243,12 +245,12 @@ object Server {
       case (world, logger0) =>
         implicit val logger: Logger[F] = logger0
 
-        val server = new Server(world)
 
         // bind to the specified socket address and restore control flow before handling connections
-        Network[F].serverResource(address = Some(host), port = Some(port)) flatMap {
-          case (_, requests) =>
+        Network[F].serverResource(address = Some(host), port = port) flatMap {
+          case (addr, requests) =>
             // at this point, the socket is bound, but we haven't received our first request
+            val server = new Server(addr.port, world)
 
             // handle each request individually
             val stream: Stream[F, Stream[F, Nothing]] = requests map { client =>
