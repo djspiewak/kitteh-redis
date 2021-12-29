@@ -194,10 +194,16 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
 object Server {
 
-  private val MaxConcurrents = 1024
-  private val MaxPipelines = 1024
+  private val DefaultPort = port"6379"
+  private val DefaultMaxConcurrents = 10000      // match Redis defaults
+  private val DefaultMaxPipelines = 1024
 
-  def apply[F[_]: Async: Network]: Resource[F, Server[F]] = {
+  def apply[F[_]: Async: Network](
+      host: Host,
+      port: Port = DefaultPort,
+      maxPipelines: Int = DefaultMaxPipelines,
+      maxConcurrents: Int = DefaultMaxConcurrents)
+      : Resource[F, Server[F]] = {
     val encoder = StreamEncoder.many(RESP.codec).toPipeByte[F]
     val decoder = StreamDecoder.many(RESP.array).toPipeByte[F]
 
@@ -210,7 +216,7 @@ object Server {
         implicit val logger: Logger[F] = logger0
 
         val server = new Server(world)
-        val stream = Network[F].server(address = Some(host"localhost"), port = Some(port"6379")) map { client =>
+        val stream = Network[F].server(address = Some(host), port = Some(port)) map { client =>
           val logging = Stream.eval(client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa")))
           val init = Stream.eval(Concurrent[F].ref(State.empty[F, String]))
 
@@ -219,7 +225,7 @@ object Server {
             val commands = resp/*.debug()*/.map(Command.parse(_))
 
             val pipelines = commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
-            val results = pipelines.parJoin(MaxPipelines)
+            val results = pipelines.parJoin(maxPipelines)
 
             val submerged = results evalMap {
               case Left(err) =>
@@ -235,7 +241,7 @@ object Server {
           }
         }
 
-        Stream.emit(server).concurrently(stream.parJoin(MaxConcurrents)).compile.resource.lastOrError
+        Stream.emit(server).concurrently(stream.parJoin(maxConcurrents)).compile.resource.lastOrError
     }
   }
 

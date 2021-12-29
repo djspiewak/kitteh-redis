@@ -16,8 +16,18 @@
 
 package kitteh
 
-import cats.effect.{IO, IOApp}
+import cats.effect.{ExitCode, IO, IOApp}
+import cats.effect.std.Console
 
-object Main extends IOApp.Simple {
-  val run = Server[IO].useForever
+import com.comcast.ip4s.Host
+
+object Main extends IOApp {
+
+  val usage = Console[IO].errorln("usage: ./kitteh host")
+
+  def run(args: List[String]): IO[ExitCode] =
+    args.headOption.flatMap(Host.fromString) match {
+      case Some(host) => Server[IO](host).useForever
+      case None => usage.as(ExitCode.Error)
+    }
 }

@@ -20,6 +20,8 @@ import cats.effect.IO
 import cats.effect.testing.specs2.CatsResource
 import cats.syntax.all._
 
+import com.comcast.ip4s._
+
 import dev.profunktor.redis4cats.{Redis, RedisCommands}
 import dev.profunktor.redis4cats.effect.Log.Stdout._
 
@@ -29,7 +31,7 @@ class IntegrationSpec
    extends CatsResource[IO, (Server[IO], RedisCommands[IO, String, String])]
    with SpecificationLike {
 
-  val resource = (Server[IO], Redis[IO].utf8("redis://localhost")).tupled
+  val resource = (Server[IO](host"0.0.0.0"), Redis[IO].utf8("redis://0.0.0.0")).tupled
 
   "real client integration" should {
     "support basic set/get" in withResource {
