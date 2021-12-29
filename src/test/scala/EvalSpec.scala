@@ -213,7 +213,7 @@ class EvalSpec extends Specification with CatsEffect {
       worldR: Ref[IO, World[IO, String, ByteVector]],
       stateR: Ref[IO, State[IO, String]])
       : Stream[IO, Either[Error.Eval, RESP]] =
-    new Server[IO](worldR).eval(command, stateR)
+    new Server[IO](Server.DefaultPort, worldR).eval(command, stateR)
 
   private def evalEmpty(command: Command): IO[Either[Error.Eval, List[RESP]]] = {
     val results = for {
