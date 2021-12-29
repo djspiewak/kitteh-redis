@@ -79,8 +79,8 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
       case Get(key) =>
         Stream.eval(world.get) flatMap {
           case World(data, _) =>
-            val results = data.get(key).map(data => Right(RESP.String.Bulk.Full(data)))
-            Stream.emit(results.getOrElse(Left(Error.Eval.UnknownKey(key))))
+            val results = data.get(key).map(RESP.String.Bulk.Full(_))
+            Stream.emit(Right(results.getOrElse(RESP.String.Bulk.Nil)))
         }
 
       case Set(key, value) =>
@@ -215,8 +215,8 @@ object Server {
           val init = Stream.eval(Concurrent[F].ref(State.empty[F, String]))
 
           logging *> init flatMap { state =>
-            val resp = client.reads.debugChunks(formatter = c => new String(c.toArray)).through(decoder)
-            val commands = resp.debug().map(Command.parse(_))
+            val resp = client.reads/*.debugChunks(formatter = c => new String(c.toArray))*/.through(decoder)
+            val commands = resp/*.debug()*/.map(Command.parse(_))
 
             val pipelines = commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
             val results = pipelines.parJoin(MaxPipelines)

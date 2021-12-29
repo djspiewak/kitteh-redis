@@ -160,7 +160,7 @@ class RESPSpec extends Specification with ScalaCheck {
 
       "simple hello (encoded)" >> {
         val input = hex"0x2a320d0a24350d0a48454c4c4f0d0a24310d0a330d0a"
-        println(new String(input.toArray))
+        // println(new String(input.toArray))
         RESP.array.decode(input.bits).toEither must beRight
       }
     }

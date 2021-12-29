@@ -63,7 +63,7 @@ class EvalSpec extends Specification with CatsEffect {
     "unknown key" >> {
       evalEmpty(Command.Get("bippy")) flatMap { results =>
         IO {
-          results must beLeft(Error.Eval.UnknownKey("bippy"))
+          results must beRight(List(RESP.String.Bulk.Nil))
         }
       }
     }

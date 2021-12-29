@@ -42,7 +42,7 @@ object RESP {
       .typecase(true, constant('1', '\r', '\n').xmap[String.Bulk.Nil.type](_ => String.Bulk.Nil, _ => ()))
       .typecase(false, (variableSizeBytes(delimInt, bytes) <~ constant(crlf)).as[String.Bulk.Full])
 
-  lazy val array: Codec[Array] = logToStdOut(constant('*') ~> array0)
+  lazy val array: Codec[Array] = /*logToStdOut(*/constant('*') ~> array0/*)*/
 
   private lazy val array0: Codec[Array] =
     discriminated[Array].by(recover(constant('-')))
