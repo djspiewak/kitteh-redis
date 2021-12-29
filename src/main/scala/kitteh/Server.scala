@@ -217,10 +217,10 @@ object Server {
 
         val server = new Server(world)
         val stream = Network[F].server(address = Some(host), port = Some(port)) map { client =>
-          val logging = Stream.eval(client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa")))
-          val init = Stream.eval(Concurrent[F].ref(State.empty[F, String]))
+          val logging = client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa"))
+          val init = Concurrent[F].ref(State.empty[F, String])
 
-          logging *> init flatMap { state =>
+          Stream.eval(logging *> init) flatMap { state =>
             val resp = client.reads/*.debugChunks(formatter = c => new String(c.toArray))*/.through(decoder)
             val commands = resp/*.debug()*/.map(Command.parse(_))
 
@@ -235,7 +235,7 @@ object Server {
                 Applicative[F].pure(resp)
             }
 
-            submerged.through(encoder).through(client.writes).drain.handleErrorWith { err =>
+            submerged.through(encoder).through(client.writes).drain handleErrorWith { err =>
               Stream.eval(Logger[F].error(err)("socket handling error")).drain
             }
           }
