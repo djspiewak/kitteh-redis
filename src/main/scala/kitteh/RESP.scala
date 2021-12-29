@@ -34,18 +34,20 @@ object RESP {
       .typecase('+', crlfTerm(utf8).as[String.Simple])
       .typecase('-', crlfTerm(utf8).as[String.Error])
       .typecase(':', delimInt.as[Int])
-      .typecase('$', bulk)
-      .typecase('*', array)
+      .typecase('$', bulk0)
+      .typecase('*', array0)
 
-  lazy val bulk: Codec[String.Bulk] =
+  private lazy val bulk0: Codec[String.Bulk] =
     discriminated[String.Bulk].by(recover(constant('-')))
       .typecase(true, constant('1', '\r', '\n').xmap[String.Bulk.Nil.type](_ => String.Bulk.Nil, _ => ()))
       .typecase(false, (variableSizeBytes(delimInt, bytes) <~ constant(crlf)).as[String.Bulk.Full])
 
-  lazy val array: Codec[Array] =
+  lazy val array: Codec[Array] = logToStdOut(constant('*') ~> array0)
+
+  private lazy val array0: Codec[Array] =
     discriminated[Array].by(recover(constant('-')))
       .typecase(true, constant('1', '\r', '\n').xmap[Array.Nil.type](_ => Array.Nil, _ => ()))
-      .typecase(false, listOfN(delimInt, lazily(codec)).as[Array.Full] <~ constant(crlf))
+      .typecase(false, listOfN(delimInt, lazily(codec)).as[Array.Full])
 
   private def crlfTerm[A](inner: Codec[A]): Codec[A] =
     Codec(

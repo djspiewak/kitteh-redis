@@ -16,7 +16,8 @@
 
 package kitteh
 
-import cats.effect.{Concurrent, Deferred, Ref, Resource}
+import cats.Applicative
+import cats.effect.{Async, Concurrent, Deferred, Ref, Resource}
 import cats.syntax.all._
 import cats.conversions.all._
 
@@ -27,9 +28,14 @@ import fs2.concurrent.Topic
 import fs2.interop.scodec.{StreamDecoder, StreamEncoder}
 import fs2.io.net.Network
 
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
+
 import scodec.bits.ByteVector
 
-final class Server[F[_]: Concurrent] private[kitteh] (world: Ref[F, Server.World[F, String, ByteVector]]) {
+final class Server[F[_]: Concurrent: Logger] private[kitteh] (
+    world: Ref[F, Server.World[F, String, ByteVector]]) {
+
   import Server.{State, World}
 
   private val MaxOutstanding = 1024
@@ -40,7 +46,9 @@ final class Server[F[_]: Concurrent] private[kitteh] (world: Ref[F, Server.World
       : Stream[F, Either[Error.Eval, RESP]] = {
     import Command._
 
-    cmd match {
+    val prelude = Stream.eval(Logger[F].debug(s"evaluating $cmd")).drain
+
+    val body = cmd match {
       case Ping(Some(msg)) =>
         Stream.emit(Right(RESP.String.Simple(msg)))
 
@@ -158,6 +166,8 @@ final class Server[F[_]: Concurrent] private[kitteh] (world: Ref[F, Server.World
 
         back.flatten
     }
+
+    prelude ++ body
   }
 }
 
@@ -166,33 +176,45 @@ object Server {
   private val MaxConcurrents = 1024
   private val MaxPipelines = 1024
 
-  def apply[F[_]: Concurrent: Network]: Resource[F, Server[F]] = {
+  def apply[F[_]: Async: Network]: Resource[F, Server[F]] = {
     val encoder = StreamEncoder.many(RESP.codec).toPipeByte[F]
     val decoder = StreamDecoder.many(RESP.array).toPipeByte[F]
 
     // in the beginning we have no data and no pubsub topics
-    Resource.eval(Concurrent[F].ref(World.empty[F, String, ByteVector])) flatMap { world =>
-      val server = new Server(world)
-      val stream = Network[F].server(port = Some(port"6379")) map { client =>
-        Stream.eval(Concurrent[F].ref(State.empty[F, String])) flatMap { state =>
-          val resp = client.reads.through(decoder)
-          val commands = resp.map(Command.parse(_))
+    val makeWorld = Resource.eval(Concurrent[F].ref(World.empty[F, String, ByteVector]))
+    val makeLogger = Resource.eval(Slf4jLogger.create[F])
 
-          val pipelines = commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
+    (makeWorld, makeLogger).tupled flatMap {
+      case (world, logger0) =>
+        implicit val logger: Logger[F] = logger0
 
-          val results = pipelines.parJoin(MaxPipelines)
+        val server = new Server(world)
+        val stream = Network[F].server(address = Some(host"localhost"), port = Some(port"6379")) map { client =>
+          val logging = Stream.eval(client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa")))
+          val init = Stream.eval(Concurrent[F].ref(State.empty[F, String]))
 
-          val submerged = results map {
-            case Left(err) => RESP.String.Error(err.toString)   // TODO
-            case Right(resp) => resp
+          logging *> init flatMap { state =>
+            val resp = client.reads.debugChunks(formatter = c => new String(c.toArray)).through(decoder)
+            val commands = resp.debug().map(Command.parse(_))
+
+            val pipelines = commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
+            val results = pipelines.parJoin(MaxPipelines)
+
+            val submerged = results evalMap {
+              case Left(err) =>
+                Logger[F].error(s"reporting error: $err").as(RESP.String.Error(err.toString): RESP)   // TODO
+
+              case Right(resp) =>
+                Applicative[F].pure(resp)
+            }
+
+            submerged.through(encoder).through(client.writes).drain.handleErrorWith { err =>
+              Stream.eval(Logger[F].error(err)("socket handling error")).drain
+            }
           }
-
-          // TODO logging
-          submerged.through(encoder).through(client.writes).drain.handleErrorWith(_ => Stream.empty)
         }
-      }
 
-      Stream.emit(server).concurrently(stream.parJoin(MaxConcurrents)).compile.resource.lastOrError
+        Stream.emit(server).concurrently(stream.parJoin(MaxConcurrents)).compile.resource.lastOrError
     }
   }
 

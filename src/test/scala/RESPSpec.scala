@@ -23,7 +23,7 @@ import org.specs2.matcher.Matcher
 import org.specs2.mutable.Specification
 
 import scodec.{Attempt, DecodeResult}
-import scodec.bits.{BitVector, ByteVector}
+import scodec.bits._
 
 class RESPSpec extends Specification with ScalaCheck {
 
@@ -77,12 +77,12 @@ class RESPSpec extends Specification with ScalaCheck {
 
     "array" >> {
       "several ints" >> {
-        RESP.Array.Full(List(RESP.Int(1), RESP.Int(2), RESP.Int(3))) must encodeAs("*3\r\n:1\r\n:2\r\n:3\r\n\r\n")
+        RESP.Array.Full(List(RESP.Int(1), RESP.Int(2), RESP.Int(3))) must encodeAs("*3\r\n:1\r\n:2\r\n:3\r\n")
       }
 
       "nested array" >> {
         RESP.Array.Full(List(RESP.Array.Full(List(RESP.String.Simple("hi"), RESP.String.Simple("there"))))) must encodeAs(
-          "*1\r\n*2\r\n+hi\r\n+there\r\n\r\n\r\n")
+          "*1\r\n*2\r\n+hi\r\n+there\r\n")
       }
 
       "nil" >> {
@@ -141,16 +141,27 @@ class RESPSpec extends Specification with ScalaCheck {
 
     "arrays" >> {
       "ints and strings" >> {
-        "*2\r\n:1234\r\n+hi there!\r\n\r\n" must decodeAs(RESP.Array.Full(List(RESP.Int(1234), RESP.String.Simple("hi there!"))))
+        "*2\r\n:1234\r\n+hi there!\r\n" must decodeAs(RESP.Array.Full(List(RESP.Int(1234), RESP.String.Simple("hi there!"))))
       }
 
       "nested array" >> {
-        "*1\r\n*1\r\n+recursion\r\n\r\n\r\n" must decodeAs(
+        "*1\r\n*1\r\n+recursion\r\n" must decodeAs(
           RESP.Array.Full(List(RESP.Array.Full(List(RESP.String.Simple("recursion"))))))
       }
 
       "nil" >> {
         "*-1\r\n" must decodeAs(RESP.Array.Nil)
+      }
+
+      "simple HELLO" >> {
+        val input = "*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n"
+        input must decodeArrayAs(RESP.Array.Full(List(RESP.String.Bulk.Ascii("HELLO"), RESP.String.Bulk.Ascii("3"))))
+      }
+
+      "simple hello (encoded)" >> {
+        val input = hex"0x2a320d0a24350d0a48454c4c4f0d0a24310d0a330d0a"
+        println(new String(input.toArray))
+        RESP.array.decode(input.bits).toEither must beRight
       }
     }
   }
@@ -210,6 +221,12 @@ class RESPSpec extends Specification with ScalaCheck {
 
   private def decodeAs(resp: RESP): Matcher[String] = { (str: String) =>
     val result = RESP.codec.decode(BitVector(str.getBytes))
+    val test = result == Attempt.successful(DecodeResult(resp, BitVector.empty))
+    (test, s"$str decoded to $resp", s"$str decoded to $result; expected $resp")
+  }
+
+  private def decodeArrayAs(resp: RESP.Array): Matcher[String] = { (str: String) =>
+    val result = RESP.array.decode(BitVector(str.getBytes))
     val test = result == Attempt.successful(DecodeResult(resp, BitVector.empty))
     (test, s"$str decoded to $resp", s"$str decoded to $result; expected $resp")
   }

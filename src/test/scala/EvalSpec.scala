@@ -25,10 +25,15 @@ import fs2.concurrent.Topic
 
 import org.specs2.mutable.Specification
 
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.noop.NoOpLogger
+
 import scodec.bits.ByteVector
 
 class EvalSpec extends Specification with CatsEffect {
   import Server._
+
+  implicit val logger: Logger[IO] = NoOpLogger[IO]
 
   "ping" >> {
     "empty" >> {
