@@ -32,6 +32,9 @@ object Command {
       case RESP.Array.Full(String.Bulk.Ascii("PING") :: Nil) =>
         Right(Ping(None))
 
+      case RESP.Array.Full(String.Bulk.Ascii("HELLO") :: _) =>
+        Right(Hello)
+
       case RESP.Array.Full(String.Bulk.Ascii("GET") :: String.Bulk.Ascii(key) :: Nil) =>
         Right(Get(key))
 
@@ -75,6 +78,7 @@ object Command {
   }
 
   final case class Ping(msg: Option[String]) extends Command
+  case object Hello extends Command
 
   final case class Get(key: String) extends Command
   final case class Set(key: String, value: ByteVector) extends Command

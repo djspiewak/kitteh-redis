@@ -30,6 +30,10 @@ class CommandSpec extends Specification {
     Command.parse(wrap("PING", "stuff")) must beRight(Command.Ping(Some("stuff")))
   }
 
+  "hello" >> {
+    Command.parse(wrap("HELLO")) must beRight(Command.Hello: Command)
+  }
+
   "get" >> {
     Command.parse(wrap("GET", "bippy")) must beRight(Command.Get("bippy"))
   }

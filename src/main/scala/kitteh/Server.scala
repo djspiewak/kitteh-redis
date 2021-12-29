@@ -40,6 +40,24 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
   private val MaxOutstanding = 1024
 
+  private val HelloResponse =
+    RESP.Array.Full(
+      List(
+        RESP.String.Simple("server"),
+        RESP.String.Simple("redis"),
+        RESP.String.Simple("version"),
+        RESP.String.Simple("255.255.255"),
+        RESP.String.Simple("proto"),
+        RESP.Int(2),
+        RESP.String.Simple("id"),
+        RESP.Int(5),
+        RESP.String.Simple("mode"),
+        RESP.String.Simple("standalone"),
+        RESP.String.Simple("role"),
+        RESP.String.Simple("master"),
+        RESP.String.Simple("modules"),
+        RESP.Array.Full(Nil)))
+
   def eval(
       cmd: Command,
       state: Ref[F, State[F, String]])
@@ -54,6 +72,9 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
       case Ping(None) =>
         Stream.emit(Right(RESP.String.Simple("PONG")))
+
+      case Hello =>
+        Stream.emit(Right(HelloResponse))
 
       case Get(key) =>
         Stream.eval(world.get) flatMap {
