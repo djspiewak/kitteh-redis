@@ -22,30 +22,52 @@ import cats.syntax.all._
 
 import com.comcast.ip4s._
 
-import dev.profunktor.redis4cats.{Redis, RedisCommands}
+import dev.profunktor.redis4cats.Redis
 import dev.profunktor.redis4cats.effect.Log.Stdout._
 
 import org.specs2.mutable.SpecificationLike
 
 class IntegrationSpec
-   extends CatsResource[IO, (Server[IO], RedisCommands[IO, String, String])]
-   with SpecificationLike {
+    extends CatsResource[IO, Server[IO]]
+    with SpecificationLike {
 
-  val resource = (Server[IO](host"0.0.0.0"), Redis[IO].utf8("redis://0.0.0.0")).tupled
+  val resource = Server[IO](host"0.0.0.0")
+  val connect = Redis[IO].utf8("redis://0.0.0.0")
 
   "real client integration" should {
-    "support basic set/get" in withResource {
-      case (_, redis) =>
+    "support basic set/get" in withResource { _ =>
+      connect use { client =>
         for {
-          before <- redis.get("test1")
-          _ <- redis.set("test1", "test value")
-          after <- redis.get("test1")
+          before <- client.get("test1")
+          _ <- client.set("test1", "test value")
+          after <- client.get("test1")
 
           _ <- IO {
             before must beNone
             after must beSome("test value")
           }
         } yield ok
+      }
+    }
+
+    "set on one client, get on another" in withResource { _ =>
+      (connect, connect).tupled use {
+        case (client1, client2) =>
+          for {
+            before1 <- client1.get("test2")
+            before2 <- client2.get("test2")
+
+            _ <- IO {
+              before1 must beNone
+              before2 must beNone
+            }
+
+            _ <- client1.set("test2", "can you read me?")
+            after <- client2.get("test2")
+
+            _ <- IO(after must beSome("can you read me?"))
+          } yield ok
+      }
     }
   }
 }
