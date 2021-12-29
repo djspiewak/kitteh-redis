@@ -40,6 +40,7 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
   private val MaxOutstanding = 1024
 
+  // hard-coded server header forcing a downgrade if necessary to RESP2
   private val HelloResponse =
     RESP.Array.Full(
       List(
@@ -58,6 +59,9 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
         RESP.String.Simple("modules"),
         RESP.Array.Full(Nil)))
 
+  // the evaluation model is pretty simple: given a command, produce some errors or some RESP values
+  // for most commands, we'll only produce a single error/resp. the main exception to this is
+  // Subscribe, which produces a stream of messages from the topic for as long as it is subscribed
   def eval(
       cmd: Command,
       state: Ref[F, State[F, String]])
@@ -66,6 +70,7 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
     val prelude = Stream.eval(Logger[F].debug(s"evaluating $cmd")).drain
 
+    // here's the command interpreter. we have one case for each command
     val body = cmd match {
       case Ping(Some(msg)) =>
         Stream.emit(Right(RESP.String.Simple(msg)))
@@ -76,6 +81,7 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
       case Hello =>
         Stream.emit(Right(HelloResponse))
 
+      // Get/Set are really simple since all we need to do is interrogate World and render the results
       case Get(key) =>
         Stream.eval(world.get) flatMap {
           case World(data, _) =>
@@ -87,13 +93,16 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
         val eff = world.update(s => s.copy(data = s.data + (key -> value)))
         Stream.eval(eff).as(Right(RESP.String.Simple("OK")))
 
+      // this looks scary but it's really all just bookkeeping on World and State
       case Subscribe(channels) =>
         Stream.eval(state.get) flatMap { st =>
+          // throw away any subscriptions we already have
           val filtered = channels.filter(st.subscriptions.contains(_))
 
           if (!filtered.isEmpty) {
             Stream.emit(Left(Error.Eval.AlreadySubscribed(filtered)))
           } else {
+            // ensure that fs2 Topics are created in the World. these will be initially subscriber-less
             val makeTopics = channels.traverse(ch => Topic[F, ByteVector].map(ch -> _)) flatMap { topics =>
               world update { w =>
                 topics.foldLeft(w) {
@@ -106,14 +115,18 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
               }
             }
 
+            // same idea as above, but instead of creating topics, we're creating the latches which
+            // will shut down the subscriptions if Unsubscribe is sent later on in this connection
             val makeSignals = channels traverse { ch =>
               Deferred[F, Either[Throwable, Unit]].map(ch -> _)
             }
 
+            // do the two above things, and then update the local connection state
             val eff = makeTopics *> makeSignals flatMap { signals =>
               val update = state update { st =>
                 signals.foldLeft(st) {
                   case (st, (ch, d)) =>
+                    // update the connection State with the unsubscription switches
                     if (st.subscriptions.contains(ch))
                       st    // we should have already caught this case, but just pessimistically guard
                     else
@@ -121,20 +134,23 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
                 }
               }
 
+              // now that the local state is updated, set up the subscriptions to the World topics
               update *> world.get map { w =>
                 val subscriptions = Stream emits {
                   signals map {
                     case (ch, d) =>
                       val topic = w.pubsub(ch)
 
+                      // MaxOutstanding represents how many unsent messages we allow before backpressure
+                      // backpressure in this case will be applied to *publishers*, protecting server memory
                       topic.subscribe(MaxOutstanding)
-                        .interruptWhen(d)
-                        .map(RESP.String.Bulk.Full(_))
+                        .interruptWhen(d)   // wire up the kill switch to ensure Unsubscribe works
+                        .map(RESP.String.Bulk.Full(_))    // wrap all responses in RESP
                         .map(Right(_))
                   }
                 }
 
-                subscriptions.parJoinUnbounded
+                subscriptions.parJoinUnbounded    // perform all the subscription work in parallel across the channel list
               }
             }
 
@@ -143,6 +159,7 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
         }
 
       case Unsubscribe(channels) =>
+        // modify our connection State first and produce the list of kill switches set up in Subscribe
         val toRemove = if (channels.isEmpty) {
           state modify { st =>
             (st.copy(subscriptions = Map()), st.subscriptions)
@@ -161,6 +178,8 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
           }
         }
 
+        // fire all of the kill switches for the unsubscribed channels, gracefully terminating their streams
+        // this will automatically remove the Topic subscription and remove the backpressure guards
         val unsubbed = Stream evals {
           toRemove flatMap { subs =>
             subs.values.toSeq.sequence_.as(subs.keys.toList)
@@ -170,12 +189,18 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
         unsubbed.map(ch => Right(RESP.String.Simple(ch)))
 
       case Publish(channel, message) =>
+        // lots of bookkeeping here just to get at the world state and fire a message to the Topic
         val back = Stream eval {
           world.get map { w =>
             w.pubsub.get(channel) match {
               case Some(t) =>
-                // TODO cheating!
+                // this is the only way fs2 gives us to find the subscriber count
+                // it poses a bit of a race condition, but not one that is likely observable
                 t.subscribers.take(1) flatMap { num =>
+                  // now that we have the Topic, publish the message to all subscribers (if any)
+                  // this will asynchronously block if all subscribers are already at MaxOutstanding,
+                  // which in turn should mean that the remote client will presumably wait before
+                  // sending their next message, since they haven't received an ACK on this one
                   Stream.eval(t.publish1(message)).as(Right(RESP.Int(num)))
                 }
 
@@ -188,6 +213,7 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
         back.flatten
     }
 
+    // marry the logging to the handler
     prelude ++ body
   }
 }
@@ -204,6 +230,8 @@ object Server {
       maxPipelines: Int = DefaultMaxPipelines,
       maxConcurrents: Int = DefaultMaxConcurrents)
       : Resource[F, Server[F]] = {
+
+    // encoder/decoder pair for RESP (provided by fs2's scodec interop)
     val encoder = StreamEncoder.many(RESP.codec).toPipeByte[F]
     val decoder = StreamDecoder.many(RESP.array).toPipeByte[F]
 
@@ -216,32 +244,68 @@ object Server {
         implicit val logger: Logger[F] = logger0
 
         val server = new Server(world)
-        val stream = Network[F].server(address = Some(host), port = Some(port)) map { client =>
-          val logging = client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa"))
-          val init = Concurrent[F].ref(State.empty[F, String])
 
-          Stream.eval(logging *> init) flatMap { state =>
-            val resp = client.reads/*.debugChunks(formatter = c => new String(c.toArray))*/.through(decoder)
-            val commands = resp/*.debug()*/.map(Command.parse(_))
+        // bind to the specified socket address and restore control flow before handling connections
+        Network[F].serverResource(address = Some(host), port = Some(port)) flatMap {
+          case (_, requests) =>
+            // at this point, the socket is bound, but we haven't received our first request
 
-            val pipelines = commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
-            val results = pipelines.parJoin(maxPipelines)
+            // handle each request individually
+            val stream: Stream[F, Stream[F, Nothing]] = requests map { client =>
+              val logging = client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa"))
+              val init = Concurrent[F].ref(State.empty[F, String])
 
-            val submerged = results evalMap {
-              case Left(err) =>
-                Logger[F].error(s"reporting error: $err").as(RESP.String.Error(err.toString): RESP)   // TODO
+              Stream.eval(logging *> init) flatMap { state =>
+                // everything in here is given an explicit type so as to be easier to follow
+                // it actually all type-infers, and originally was written without ascription
 
-              case Right(resp) =>
-                Applicative[F].pure(resp)
+                // parse all incoming data as RESP arrays (erroring and closing the connection on failure)
+                val resp: Stream[F, RESP.Array] = client.reads.through(decoder)
+                // parse RESP values as Redis commands, producing semantic errors on parse failure
+                val commands: Stream[F, Either[Error.Parse, Command]] = resp.map(Command.parse(_))
+
+                // we're being non-compliant with pipelines here since we handle them in parallel
+                // the way this works is we're parsing commands as fast as we can, *concurrent*
+                // with our evaluation of those commands down here
+
+                // the `traverse` is just to get into the Either, and we flatten the evaluation and
+                // parsing errors together into Error
+                val pipelines: Stream[F, Stream[F, Either[Error, RESP]]] =
+                  commands.map(_.traverse(server.eval(_, state)).map(_.flatten[Error, RESP]))
+
+                // here's the parallelism which allows us to evaluate up to maxPipelines commands at once
+                // note that this can also reorder output so we're just REALLY being non-compliant all around
+                // the only reason we're doing this is because it makes pub/sub easier to encode
+                val results: Stream[F, Either[Error, RESP]] = pipelines.parJoin(maxPipelines)
+
+                // render all semantic errors as RESP.Error tokens
+                val submerged: Stream[F, RESP] = results evalMap {
+                  case Left(err) =>
+                    Logger[F].error(s"reporting error: $err").as(RESP.String.Error(err.toString): RESP)   // TODO
+
+                  case Right(resp) =>
+                    Applicative[F].pure(resp)
+                }
+
+                // we need to reply in terms of bytes again, so all the RESP gets encoded on the way out
+                val encoded: Stream[F, Byte] = submerged.through(encoder)
+
+                // something a little subtle here is the resulting stream will be continuous so long
+                // as the `client.reads` stream continues to produce data, meaning we will sit here
+                // and process commands for as long as the client is connected. this is exactly what we want!
+                encoded.through(client.writes).drain handleErrorWith { err =>
+                  // if we hit any errors, we want to shut down the client socket, but not the server socket
+                  // so we just log and call it a day
+                  Stream.eval(Logger[F].error(err)("socket handling error")).drain
+                }
+              }
             }
 
-            submerged.through(encoder).through(client.writes).drain handleErrorWith { err =>
-              Stream.eval(Logger[F].error(err)("socket handling error")).drain
-            }
-          }
+            // produce the Server[F] while simultaneously handling up to `maxConcurrents` requests simultaneously
+            // using .compile.resource means that the background request handling will continue after the
+            // Server[F] value is yielded to the caller, but will shut down gracefully when the calling scope closes
+            Stream.emit(server).concurrently(stream.parJoin(maxConcurrents)).compile.resource.lastOrError
         }
-
-        Stream.emit(server).concurrently(stream.parJoin(maxConcurrents)).compile.resource.lastOrError
     }
   }
 
