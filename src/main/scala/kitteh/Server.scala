@@ -137,17 +137,34 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
 
               // now that the local state is updated, set up the subscriptions to the World topics
               update *> world.get map { w =>
-                val subscriptions = Stream emits {
-                  signals map {
-                    case (ch, d) =>
-                      val topic = w.pubsub(ch)
+                val subscriptions = Stream evals {
+                  // we need to produce the number of active subscriptions in the responses
+                  // we cheat here and list the full number, rather than counting up with each sub
+                  state.get.map(_.subscriptions.size) map { num =>
+                    signals map {
+                      case (ch, d) =>
+                        val topic = w.pubsub(ch)
 
-                      // MaxOutstanding represents how many unsent messages we allow before backpressure
-                      // backpressure in this case will be applied to *publishers*, protecting server memory
-                      topic.subscribe(MaxOutstanding)
-                        .interruptWhen(d)   // wire up the kill switch to ensure Unsubscribe works
-                        .map(RESP.String.Bulk.Full(_))    // wrap all responses in RESP
-                        .map(Right(_))
+                        val confirmation = RESP.Array.Full(
+                          List(
+                            RESP.String.Bulk.Ascii("subscribe"),
+                            RESP.String.Bulk.Ascii(ch),
+                            RESP.Int(num)))
+
+                        def message(bytes: ByteVector): RESP =
+                          RESP.Array.Full(
+                            List(
+                              RESP.String.Bulk.Ascii("message"),
+                              RESP.String.Bulk.Ascii(ch),
+                              RESP.String.Bulk.Full(bytes)))
+
+                        // MaxOutstanding represents how many unsent messages we allow before backpressure
+                        // backpressure in this case will be applied to *publishers*, protecting server memory
+                        Stream.emit(Right(confirmation)) ++ topic.subscribe(MaxOutstanding)
+                          .interruptWhen(d)   // wire up the kill switch to ensure Unsubscribe works
+                          .map(message)    // wrap all responses in RESP packet
+                          .map(Right(_))
+                    }
                   }
                 }
 
@@ -187,7 +204,21 @@ final class Server[F[_]: Concurrent: Logger] private[kitteh] (
           }
         }
 
-        unsubbed.map(ch => Right(RESP.String.Simple(ch)))
+        val back = Stream eval {
+          state.get.map(_.subscriptions.size) map { before =>
+            unsubbed.zipWithIndex map {
+              case (ch, i) =>
+                Right(
+                  RESP.Array.Full(
+                    List(
+                      RESP.String.Bulk.Ascii("unsubscribe"),
+                      RESP.String.Bulk.Ascii(ch),
+                      RESP.Int(before - i.toInt))))
+            }
+          }
+        }
+
+        back.flatten
 
       case Publish(channel, message) =>
         // lots of bookkeeping here just to get at the world state and fire a message to the Topic

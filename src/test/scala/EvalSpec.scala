@@ -118,19 +118,33 @@ class EvalSpec extends Specification with CatsEffect {
         bippy <- Resource.eval(Topic[IO, ByteVector])
 
         // subscribe in parallel and push the first result into `results`
-        results <- Resource.eval(IO.deferred[ByteVector])
+        results <- Resource.eval(IO.deferred[Either[Throwable, Unit]])
         _ <- evalWithTopics(Command.Subscribe(List("bippy")), "bippy" -> bippy)
-          .take(1)
+          .take(2)
           .compile
-          .lastOrError
-          .flatMap { e =>
+          .toList
+          .flatMap { es =>
             IO {
-              e match {
-                case Right(RESP.String.Bulk.Full(data)) => data
-                case _ => sys.error("assertion failed")
+              es must beLike {
+                case
+                  Right(
+                    RESP.Array.Full(List(
+                      RESP.String.Bulk.Ascii("subscribe"),
+                      RESP.String.Bulk.Ascii("bippy"),
+                      RESP.Int(1)))) ::
+                  Right(
+                    RESP.Array.Full(List(
+                      RESP.String.Bulk.Ascii("message"),
+                      RESP.String.Bulk.Ascii("bippy"),
+                      RESP.String.Bulk.Full(data2)))) ::
+                  Nil
+                  => data2 mustEqual data
               }
+
+              ()
             }
           }
+          .attempt
           .flatMap(results.complete(_))
           .background
 
@@ -138,13 +152,7 @@ class EvalSpec extends Specification with CatsEffect {
         _ <- Resource.eval(bippy.subscribers.dropWhile(_ < 1).take(1).compile.drain)
 
         _ <- Resource.eval(bippy.publish1(data))
-        back <- Resource.eval(results.get)
-
-        _ <- Resource eval {
-          IO {
-            back mustEqual data
-          }
-        }
+        _ <- Resource.eval(results.get).rethrow
       } yield ok
     }
 
@@ -188,12 +196,31 @@ class EvalSpec extends Specification with CatsEffect {
         IO.ref(false) flatMap { latch =>
           val client1 = for {
             stateR <- Resource.eval(IO.ref(State.empty[IO, String]))
-            received <- eval(Command.Subscribe(List(name)), worldR, stateR).take(1).compile.resource.lastOrError
+
+            received <- eval(Command.Subscribe(List(name)), worldR, stateR)
+              .tail
+              .take(1)
+              .compile
+              .resource
+              .lastOrError
 
             _ <- Resource.eval(latch.set(true))
-            _ <- Resource.eval(IO(received must beRight(RESP.String.Bulk.Full(data1))))
+            _ <- Resource eval {
+              IO {
+                received must beRight {
+                  RESP.Array.Full(
+                    List(
+                      RESP.String.Bulk.Ascii("message"),
+                      RESP.String.Bulk.Ascii(name),
+                      RESP.String.Bulk.Full(data1)))
+                }
+              }
+            }
 
-            _ <- eval(Command.Unsubscribe(List(name)), worldR, stateR).compile.resource.drain
+            _ <- eval(Command.Unsubscribe(List(name)), worldR, stateR)
+              .compile
+              .resource
+              .drain
           } yield ()
 
           val client2 = for {

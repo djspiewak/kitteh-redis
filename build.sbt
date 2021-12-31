@@ -26,6 +26,7 @@ ThisBuild / crossScalaVersions := Seq("2.13.7")
 
 val Fs2Version = "3.2.3"
 val Log4CatsVersion = "2.1.1"
+val Redis4CatsVersion = "1.0.0"
 
 libraryDependencies ++= Seq(
   "org.typelevel" %% "cats-effect"    % "3.3.1",
@@ -36,7 +37,8 @@ libraryDependencies ++= Seq(
   "co.fs2"     %% "fs2-io"      % Fs2Version,
   "co.fs2"     %% "fs2-scodec"  % Fs2Version,
 
-  "org.typelevel"  %% "cats-effect-testing-specs2" % "1.4.0"          % Test,
-  "org.typelevel"  %% "log4cats-noop"              % Log4CatsVersion  % Test,
-  "org.specs2"     %% "specs2-scalacheck"          % "4.13.1"         % Test,
-  "dev.profunktor" %% "redis4cats-effects"         % "1.0.0"          % Test)
+  "org.typelevel"  %% "cats-effect-testing-specs2" % "1.4.0"           % Test,
+  "org.typelevel"  %% "log4cats-noop"              % Log4CatsVersion   % Test,
+  "org.specs2"     %% "specs2-scalacheck"          % "4.13.1"          % Test,
+  "dev.profunktor" %% "redis4cats-effects"         % Redis4CatsVersion % Test,
+  "dev.profunktor" %% "redis4cats-streams"         % Redis4CatsVersion % Test)
