@@ -29,7 +29,7 @@ val Log4CatsVersion = "2.1.1"
 val Redis4CatsVersion = "1.0.0"
 
 libraryDependencies ++= Seq(
-  "org.typelevel" %% "cats-effect"    % "3.3.1",
+  "org.typelevel" %% "cats-effect"    % "3.3.2",
   "org.typelevel" %% "log4cats-slf4j" % Log4CatsVersion,
   "org.slf4j"     %  "slf4j-log4j12"  % "1.7.9",
 
