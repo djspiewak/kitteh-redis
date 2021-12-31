@@ -117,9 +117,8 @@ class EvalSpec extends Specification with CatsEffect {
       for {
         bippy <- Resource.eval(Topic[IO, ByteVector])
 
-        // subscribe in parallel and push the first result into `results`
-        results <- Resource.eval(IO.deferred[Either[Throwable, Unit]])
-        _ <- evalWithTopics(Command.Subscribe(List("bippy")), "bippy" -> bippy)
+        // subscribe in parallel and assert on the results
+        get <- evalWithTopics(Command.Subscribe(List("bippy")), "bippy" -> bippy)
           .take(2)
           .compile
           .toList
@@ -144,15 +143,13 @@ class EvalSpec extends Specification with CatsEffect {
               ()
             }
           }
-          .attempt
-          .flatMap(results.complete(_))
           .background
 
         // wait until the subscription is registered
         _ <- Resource.eval(bippy.subscribers.dropWhile(_ < 1).take(1).compile.drain)
 
         _ <- Resource.eval(bippy.publish1(data))
-        _ <- Resource.eval(results.get).rethrow
+        _ <- Resource.eval(get.flatMap(_.embedNever))
       } yield ok
     }
 
@@ -162,9 +159,13 @@ class EvalSpec extends Specification with CatsEffect {
       for {
         bippy <- Resource.eval(Topic[IO, ByteVector])
 
-        results <- Resource.eval(IO.deferred[ByteVector])
-        _ <- bippy.subscribe(Int.MaxValue).take(1).compile.lastOrError.flatMap(results.complete(_)).background
+        get <- bippy.subscribe(Int.MaxValue)
+          .take(1)
+          .compile
+          .lastOrError
+          .background
 
+        _ <- Resource.eval(bippy.subscribers.dropWhile(_ < 1).take(1).compile.lastOrError)
         response <- Resource.eval(evalWithTopics(Command.Publish("bippy", data), "bippy" -> bippy).compile.toList)
 
         _ <- Resource eval {
@@ -176,7 +177,7 @@ class EvalSpec extends Specification with CatsEffect {
           }
         }
 
-        back <- Resource.eval(results.get)
+        back <- Resource.eval(get.flatMap(_.embedNever))
 
         _ <- Resource eval {
           IO {
