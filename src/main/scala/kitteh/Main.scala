@@ -18,7 +18,6 @@ package kitteh
 
 import cats.effect.{ExitCode, IO, IOApp}
 import cats.effect.std.Console
-
 import com.comcast.ip4s.Host
 
 object Main extends IOApp {
@@ -28,6 +27,6 @@ object Main extends IOApp {
   def run(args: List[String]): IO[ExitCode] =
     args.headOption.flatMap(Host.fromString) match {
       case Some(host) => Server[IO](host).useForever
-      case None => usage.as(ExitCode.Error)
+      case None       => usage.as(ExitCode.Error)
     }
 }
