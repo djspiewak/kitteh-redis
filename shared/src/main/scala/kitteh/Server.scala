@@ -280,7 +280,7 @@ object Server {
     // in the beginning we have no data and no pubsub topics
     val makeWorld =
       Resource.eval(Concurrent[F].ref(World.empty[F, String, ByteVector]))
-    val makeLogger = Resource.pure[F, Logger[F]](ConsoleLogger.make[F])
+    val makeLogger = KittehLogger.resource[F]
 
     (makeWorld, makeLogger).tupled flatMap { case (world, logger0) =>
       implicit val logger: Logger[F] = logger0

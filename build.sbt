@@ -35,10 +35,9 @@ val isMacOs = {
   osName.exists(_.toLowerCase().contains("mac"))
 }
 
-lazy val `kitteh-redis` = crossProject(JVMPlatform, NativePlatform)
+lazy val core = crossProject(JVMPlatform, NativePlatform)
   .in(file("."))
   .settings(
-    name := "kitteh-redis",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % "3.3.14",
       "org.typelevel" %%% "log4cats-core" % Log4CatsVersion,
@@ -66,9 +65,15 @@ lazy val `kitteh-redis` = crossProject(JVMPlatform, NativePlatform)
       val ldLibPath =
         if (isLinux)
           Map("LD_LIBRARY_PATH" -> "/home/linuxbrew/.linuxbrew/lib")
-        else Map("LD_LIBRARY_PATH" -> "/usr/local/opt/openssl@1.1/lib")
+        else Map("LD_LIBRARY_PATH" -> "/opt/homebrew/opt/openssl@1.1/lib")
       Map("S2N_DONT_MLOCK" -> "1") ++ ldLibPath
     }
+  )
+  .jvmSettings(
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "log4cats-slf4j" % Log4CatsVersion,
+      "org.slf4j" % "slf4j-log4j12" % "1.7.9"
+    )
   )
   .nativeSettings {
     libraryDependencies ++= Seq(
@@ -76,6 +81,6 @@ lazy val `kitteh-redis` = crossProject(JVMPlatform, NativePlatform)
     )
   }
 
-lazy val root = project
+lazy val `kitteh-redis` = project
   .in(file("."))
-  .aggregate(`kitteh-redis`.jvm, `kitteh-redis`.native)
+  .aggregate(core.jvm, core.native)

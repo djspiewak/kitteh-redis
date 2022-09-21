@@ -16,17 +16,12 @@
 
 package kitteh
 
-import cats.effect.{ExitCode, IO, IOApp}
-import cats.effect.std.Console
-import com.comcast.ip4s.Host
+import cats.effect.Resource
+import cats.effect.kernel.Sync
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
-object Main extends IOApp {
-
-  val usage = Console[IO].errorln("usage: ./kitteh host")
-
-  def run(args: List[String]): IO[ExitCode] =
-    args.headOption.flatMap(Host.fromString) match {
-      case Some(host) => Server[IO](host).useForever.as(ExitCode.Success)
-      case None       => usage.as(ExitCode.Error)
-    }
+object KittehLogger {
+  def resource[F[_]: Sync]: Resource[F, Logger[F]] =
+    Resource.eval(Slf4jLogger.create[F])
 }
