@@ -60,6 +60,7 @@ final class KittehLogger[F[_]](implicit Console: Console[F]) extends Logger[F] {
 
 object KittehLogger {
   def resource[F[_]: Sync]: Resource[F, Logger[F]] =
-    Resource.pure(Console.make[F])
+    Resource
+      .pure(Console.make[F])
       .map(implicit console => new KittehLogger[F])
 }

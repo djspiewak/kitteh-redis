@@ -17,10 +17,8 @@
 package kitteh
 
 import cats.Applicative
-import cats.effect.{Async, Concurrent, Deferred, Ref, Resource}
+import cats.effect._
 import cats.syntax.all._
-import cats.conversions.all._
-import cats.effect.std.Console
 import com.comcast.ip4s._
 import fs2.Stream
 import fs2.concurrent.Topic
@@ -266,7 +264,7 @@ object Server {
   private val DefaultMaxConcurrents = 10000 // match Redis defaults
   private val DefaultMaxPipelines = 1024
 
-  def apply[F[_]: Async: Network: Console](
+  def apply[F[_]: Async: Network](
       host: Host,
       port: Option[Port] = Some(DefaultPort),
       maxPipelines: Int = DefaultMaxPipelines,
@@ -278,16 +276,22 @@ object Server {
     val decoder = StreamDecoder.many(RESP.array).toPipeByte[F]
 
     // in the beginning we have no data and no pubsub topics
-    val makeWorld =
+    val makeWorld: Resource[F, Ref[F, World[F, String, ByteVector]]] =
       Resource.eval(Concurrent[F].ref(World.empty[F, String, ByteVector]))
-    val makeLogger = KittehLogger.resource[F]
+    val makeLogger: Resource[F, Logger[F]] = KittehLogger.resource[F]
 
     (makeWorld, makeLogger).tupled flatMap { case (world, logger0) =>
       implicit val logger: Logger[F] = logger0
 
       // bind to the specified socket address and restore control flow before handling connections
-      Network[F].serverResource(address = Some(host), port = port) flatMap {
-        case (addr, requests) =>
+      Network[F]
+        .serverResource(address = Some(host), port = port)
+        .flatTap(server =>
+          Resource.eval(
+            Logger[F].info(s"Server Info: $server")
+          )
+        )
+        .flatMap { case (addr, requests) =>
           // at this point, the socket is bound, but we haven't received our first request
           val server = new Server(addr.port, world)
 
@@ -354,12 +358,12 @@ object Server {
           // using .compile.resource means that the background request handling will continue after the
           // Server[F] value is yielded to the caller, but will shut down gracefully when the calling scope closes
           Stream
-            .emit(server)
+            .emit[F, Server[F]](server)
             .concurrently(stream.parJoin(maxConcurrents))
             .compile
             .resource
             .lastOrError
-      }
+        }
     }
   }
 

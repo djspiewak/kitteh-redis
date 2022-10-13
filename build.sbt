@@ -35,8 +35,7 @@ val isMacOs = {
   osName.exists(_.toLowerCase().contains("mac"))
 }
 
-lazy val core = crossProject(JVMPlatform, NativePlatform)
-  .in(file("."))
+lazy val server = crossProject(JVMPlatform, NativePlatform)
   .settings(
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % "3.3.14",
@@ -81,6 +80,9 @@ lazy val core = crossProject(JVMPlatform, NativePlatform)
     )
   }
 
-lazy val `kitteh-redis` = project
+lazy val root = project
   .in(file("."))
-  .aggregate(core.jvm, core.native)
+  .settings(
+    name := "kitteh-redis"
+  )
+  .aggregate(server.jvm, server.native)
