@@ -286,11 +286,6 @@ object Server {
       // bind to the specified socket address and restore control flow before handling connections
       Network[F]
         .serverResource(address = Some(host), port = port)
-        .flatTap(server =>
-          Resource.eval(
-            Logger[F].info(s"Server Info: $server")
-          )
-        )
         .flatMap { case (addr, requests) =>
           // at this point, the socket is bound, but we haven't received our first request
           val server = new Server(addr.port, world)
@@ -311,7 +306,7 @@ object Server {
                 val resp: Stream[F, RESP.Array] = client.reads.through(decoder)
                 // parse RESP values as Redis commands, producing semantic errors on parse failure
                 val commands: Stream[F, Either[Error.Parse, Command]] =
-                  resp.map(Command.parse(_))
+                  resp.map(Command.parse)
 
                 // we're being non-compliant with pipelines here since we handle them in parallel
                 // the way this works is we're parsing commands as fast as we can, *concurrent*

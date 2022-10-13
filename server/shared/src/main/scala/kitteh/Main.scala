@@ -17,12 +17,12 @@
 package kitteh
 
 import cats.effect.std.Console
-import cats.effect.{ExitCode, IO, IOApp}
+import cats.effect.{ExitCode, IO}
 import com.comcast.ip4s.Host
-import epollcat.EpollApp
 import fs2.io.net.Network
+import io.chrisdavenport.crossplatformioapp.CrossPlatformIOApp
 
-object Main extends EpollApp {
+object Main extends CrossPlatformIOApp {
 
   val usage = Console[IO].errorln("usage: ./kitteh host")
 

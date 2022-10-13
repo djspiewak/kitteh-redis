@@ -43,6 +43,7 @@ lazy val server = crossProject(JVMPlatform, NativePlatform)
       "org.scodec" %%% "scodec-core" % "1.11.10",
       "co.fs2" %%% "fs2-io" % Fs2Version,
       "co.fs2" %%% "fs2-scodec" % Fs2Version,
+      "io.chrisdavenport" %%% "crossplatformioapp" % "0.1.0",
       "org.typelevel" %% "cats-effect-testing-specs2" % "1.4.0" % Test,
       "org.typelevel" %% "log4cats-noop" % Log4CatsVersion % Test,
       "org.specs2" %% "specs2-scalacheck" % "4.13.1" % Test,
@@ -71,7 +72,7 @@ lazy val server = crossProject(JVMPlatform, NativePlatform)
   .jvmSettings(
     libraryDependencies ++= Seq(
       "org.typelevel" %% "log4cats-slf4j" % Log4CatsVersion,
-      "org.slf4j" % "slf4j-log4j12" % "1.7.9"
+      "org.slf4j" % "slf4j-log4j12" % "2.0.3"
     )
   )
   .nativeSettings {
