@@ -26,15 +26,6 @@ val Fs2Version = "3.3.0"
 val Log4CatsVersion = "2.5.0"
 val Redis4CatsVersion = "1.0.0"
 
-val isLinux = {
-  val osName = Option(System.getProperty("os.name"))
-  osName.exists(_.toLowerCase().contains("linux"))
-}
-val isMacOs = {
-  val osName = Option(System.getProperty("os.name"))
-  osName.exists(_.toLowerCase().contains("mac"))
-}
-
 lazy val server = crossProject(JVMPlatform, NativePlatform)
   .settings(
     libraryDependencies ++= Seq(
@@ -49,25 +40,7 @@ lazy val server = crossProject(JVMPlatform, NativePlatform)
       "org.specs2" %% "specs2-scalacheck" % "4.13.1" % Test,
       "dev.profunktor" %% "redis4cats-effects" % Redis4CatsVersion % Test,
       "dev.profunktor" %% "redis4cats-streams" % Redis4CatsVersion % Test
-    ),
-    nativeConfig ~= { c =>
-      if (isLinux) { // brew-installed s2n
-        c.withLinkingOptions(
-          c.linkingOptions :+ "-L/home/linuxbrew/.linuxbrew/lib"
-        )
-      } else if (isMacOs) // brew-installed OpenSSL
-        c.withLinkingOptions(
-          c.linkingOptions :+ "-L/opt/homebrew/opt/openssl@1.1/lib"
-        )
-      else c
-    },
-    envVars ++= {
-      val ldLibPath =
-        if (isLinux)
-          Map("LD_LIBRARY_PATH" -> "/home/linuxbrew/.linuxbrew/lib")
-        else Map("LD_LIBRARY_PATH" -> "/opt/homebrew/opt/openssl@1.1/lib")
-      Map("S2N_DONT_MLOCK" -> "1") ++ ldLibPath
-    }
+    )
   )
   .jvmSettings(
     libraryDependencies ++= Seq(
@@ -80,6 +53,7 @@ lazy val server = crossProject(JVMPlatform, NativePlatform)
       "com.armanbilge" %%% "epollcat" % "0.1.0"
     )
   }
+  .nativeEnablePlugins(ScalaNativeBrewedConfigPlugin)
 
 lazy val root = project
   .in(file("."))
