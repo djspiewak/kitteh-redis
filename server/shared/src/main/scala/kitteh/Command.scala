@@ -26,9 +26,7 @@ object Command {
     import RESP._
 
     in match {
-      case RESP.Array.Full(
-            String.Bulk.Ascii("PING") :: String.Bulk.Ascii(contents) :: Nil
-          ) =>
+      case RESP.Array.Full(String.Bulk.Ascii("PING") :: String.Bulk.Ascii(contents) :: Nil) =>
         Right(Ping(Some(contents)))
 
       case RESP.Array.Full(String.Bulk.Ascii("PING") :: Nil) =>
@@ -37,20 +35,15 @@ object Command {
       case RESP.Array.Full(String.Bulk.Ascii("HELLO") :: _) =>
         Right(Hello)
 
-      case RESP.Array.Full(
-            String.Bulk.Ascii("GET") :: String.Bulk.Ascii(key) :: Nil
-          ) =>
+      case RESP.Array.Full(String.Bulk.Ascii("GET") :: String.Bulk.Ascii(key) :: Nil) =>
         Right(Get(key))
 
-      case RESP.Array.Full(
-            String.Bulk.Ascii("SET") :: String.Bulk.Ascii(key) :: String.Bulk
-              .Full(value) :: Nil
-          ) =>
+      case RESP.Array.Full(String.Bulk.Ascii("SET") :: String.Bulk.Ascii(key) :: String.Bulk.Full(value) :: Nil) =>
         Right(Set(key, value))
 
       case RESP.Array.Full(String.Bulk.Ascii("SUBSCRIBE") :: channels0) =>
-        val channels = channels0 collect { case String.Bulk.Ascii(name) =>
-          name
+        val channels = channels0 collect {
+          case String.Bulk.Ascii(name) => name
         }
 
         if (channels.length != channels0.length)
@@ -70,11 +63,7 @@ object Command {
         else
           Right(Unsubscribe(channels))
 
-      case RESP.Array.Full(
-            String.Bulk.Ascii("PUBLISH") :: String.Bulk.Ascii(
-              channel
-            ) :: String.Bulk.Full(message) :: Nil
-          ) =>
+      case RESP.Array.Full(String.Bulk.Ascii("PUBLISH") :: String.Bulk.Ascii(channel) :: String.Bulk.Full(message) :: Nil) =>
         Right(Publish(channel, message))
 
       case RESP.Array.Full(String.Bulk.Ascii(cmd) :: _) =>

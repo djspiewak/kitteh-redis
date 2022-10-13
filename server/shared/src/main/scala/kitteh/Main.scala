@@ -31,6 +31,6 @@ object Main extends CrossPlatformIOApp {
   def run(args: List[String]): IO[ExitCode] =
     args.headOption.flatMap(Host.fromString) match {
       case Some(host) => Server[IO](host).useForever.as(ExitCode.Success)
-      case None       => usage.as(ExitCode.Error)
+      case None => usage.as(ExitCode.Error)
     }
 }
