@@ -54,8 +54,8 @@ object Command {
           Right(Subscribe(channels))
 
       case RESP.Array.Full(String.Bulk.Ascii("UNSUBSCRIBE") :: channels0) =>
-        val channels = channels0 collect { case String.Bulk.Ascii(name) =>
-          name
+        val channels = channels0 collect {
+          case String.Bulk.Ascii(name) => name
         }
 
         if (channels.length != channels0.length)
