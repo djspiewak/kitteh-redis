@@ -19,7 +19,6 @@ package kitteh
 import cats.Applicative
 import cats.effect.{Async, Concurrent, Deferred, Ref, Resource}
 import cats.syntax.all._
-import cats.conversions.all._
 
 import com.comcast.ip4s._
 
@@ -29,7 +28,6 @@ import fs2.interop.scodec.{StreamDecoder, StreamEncoder}
 import fs2.io.net.Network
 
 import org.typelevel.log4cats.Logger
-import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import scodec.bits.ByteVector
 
@@ -270,12 +268,11 @@ object Server {
 
     // in the beginning we have no data and no pubsub topics
     val makeWorld = Resource.eval(Concurrent[F].ref(World.empty[F, String, ByteVector]))
-    val makeLogger = Resource.eval(Slf4jLogger.create[F])
+    val makeLogger = KittehLogger.resource[F]
 
     (makeWorld, makeLogger).tupled flatMap {
       case (world, logger0) =>
         implicit val logger: Logger[F] = logger0
-
 
         // bind to the specified socket address and restore control flow before handling connections
         Network[F].serverResource(address = Some(host), port = port) flatMap {
