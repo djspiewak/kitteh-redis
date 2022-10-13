@@ -23,7 +23,7 @@ import com.comcast.ip4s._
 import fs2.Stream
 import fs2.concurrent.Topic
 import fs2.interop.scodec.{StreamDecoder, StreamEncoder}
-import fs2.io.net.Network
+import fs2.io.net.{Network, Socket}
 import org.typelevel.log4cats.Logger
 import scodec.bits.ByteVector
 
@@ -296,63 +296,67 @@ object Server {
           val server = new Server(addr.port, world)
 
           // handle each request individually
-          val stream: Stream[F, Stream[F, Nothing]] = requests map { client =>
-            val logging = client.remoteAddress.flatMap(isa =>
-              Logger[F].debug(s"accepting connection from $isa")
-            )
-            val init = Concurrent[F].ref(State.empty[F, String])
+          val stream: Stream[F, Stream[F, Nothing]] = requests
+            .map { client =>
+              val logging = client.remoteAddress.flatMap(isa =>
+                Logger[F].debug(s"accepting connection from $isa")
+              )
+              val init = Concurrent[F].ref(State.empty[F, String])
 
-            Stream.eval(logging *> init) flatMap { state =>
-              // everything in here is given an explicit type so as to be easier to follow
-              // it actually all type-infers, and originally was written without ascription
+              Stream.eval(logging *> init) flatMap { state =>
+                // everything in here is given an explicit type so as to be easier to follow
+                // it actually all type-infers, and originally was written without ascription
 
-              // parse all incoming data as RESP arrays (erroring and closing the connection on failure)
-              val resp: Stream[F, RESP.Array] = client.reads.through(decoder)
-              // parse RESP values as Redis commands, producing semantic errors on parse failure
-              val commands: Stream[F, Either[Error.Parse, Command]] =
-                resp.map(Command.parse(_))
+                // parse all incoming data as RESP arrays (erroring and closing the connection on failure)
+                val resp: Stream[F, RESP.Array] = client.reads.through(decoder)
+                // parse RESP values as Redis commands, producing semantic errors on parse failure
+                val commands: Stream[F, Either[Error.Parse, Command]] =
+                  resp.map(Command.parse(_))
 
-              // we're being non-compliant with pipelines here since we handle them in parallel
-              // the way this works is we're parsing commands as fast as we can, *concurrent*
-              // with our evaluation of those commands down here
+                // we're being non-compliant with pipelines here since we handle them in parallel
+                // the way this works is we're parsing commands as fast as we can, *concurrent*
+                // with our evaluation of those commands down here
 
-              // the `traverse` is just to get into the Either, and we flatten the evaluation and
-              // parsing errors together into Error
-              val pipelines: Stream[F, Stream[F, Either[Error, RESP]]] =
-                commands.map(
-                  _.traverse(server.eval(_, state)).map(_.flatten[Error, RESP])
-                )
+                // the `traverse` is just to get into the Either, and we flatten the evaluation and
+                // parsing errors together into Error
+                val pipelines: Stream[F, Stream[F, Either[Error, RESP]]] =
+                  commands.map(
+                    _.traverse(server.eval(_, state))
+                      .map(_.flatten[Error, RESP])
+                  )
 
-              // here's the parallelism which allows us to evaluate up to maxPipelines commands at once
-              // note that this can also reorder output so we're just REALLY being non-compliant all around
-              // the only reason we're doing this is because it makes pub/sub easier to encode
-              val results: Stream[F, Either[Error, RESP]] =
-                pipelines.parJoin(maxPipelines)
+                // here's the parallelism which allows us to evaluate up to maxPipelines commands at once
+                // note that this can also reorder output so we're just REALLY being non-compliant all around
+                // the only reason we're doing this is because it makes pub/sub easier to encode
+                val results: Stream[F, Either[Error, RESP]] =
+                  pipelines.parJoin(maxPipelines)
 
-              // render all semantic errors as RESP.Error tokens
-              val submerged: Stream[F, RESP] = results evalMap {
-                case Left(err) =>
-                  Logger[F]
-                    .error(s"reporting error: $err")
-                    .as(RESP.String.Error(err.toString): RESP) // TODO
+                // render all semantic errors as RESP.Error tokens
+                val submerged: Stream[F, RESP] = results evalMap {
+                  case Left(err) =>
+                    Logger[F]
+                      .error(s"reporting error: $err")
+                      .as(RESP.String.Error(err.toString): RESP) // TODO
 
-                case Right(resp) =>
-                  Applicative[F].pure(resp)
-              }
+                  case Right(resp) =>
+                    Applicative[F].pure(resp)
+                }
 
-              // we need to reply in terms of bytes again, so all the RESP gets encoded on the way out
-              val encoded: Stream[F, Byte] = submerged.through(encoder)
+                // we need to reply in terms of bytes again, so all the RESP gets encoded on the way out
+                val encoded: Stream[F, Byte] = submerged.through(encoder)
 
-              // something a little subtle here is the resulting stream will be continuous so long
-              // as the `client.reads` stream continues to produce data, meaning we will sit here
-              // and process commands for as long as the client is connected. this is exactly what we want!
-              encoded.through(client.writes).drain handleErrorWith { err =>
-                // if we hit any errors, we want to shut down the client socket, but not the server socket
-                // so we just log and call it a day
-                Stream.eval(Logger[F].error(err)("socket handling error")).drain
+                // something a little subtle here is the resulting stream will be continuous so long
+                // as the `client.reads` stream continues to produce data, meaning we will sit here
+                // and process commands for as long as the client is connected. this is exactly what we want!
+                encoded.through(client.writes).drain handleErrorWith { err =>
+                  // if we hit any errors, we want to shut down the client socket, but not the server socket
+                  // so we just log and call it a day
+                  Stream
+                    .eval(Logger[F].error(err)("socket handling error"))
+                    .drain
+                }
               }
             }
-          }
 
           // produce the Server[F] while simultaneously handling up to `maxConcurrents` requests simultaneously
           // using .compile.resource means that the background request handling will continue after the

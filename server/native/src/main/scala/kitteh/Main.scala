@@ -16,13 +16,17 @@
 
 package kitteh
 
-import cats.effect.{ExitCode, IO, IOApp}
 import cats.effect.std.Console
+import cats.effect.{ExitCode, IO, IOApp}
 import com.comcast.ip4s.Host
+import epollcat.EpollApp
+import fs2.io.net.Network
 
-object Main extends IOApp {
+object Main extends EpollApp {
 
   val usage = Console[IO].errorln("usage: ./kitteh host")
+
+  Network[IO].serverResource()
 
   def run(args: List[String]): IO[ExitCode] =
     args.headOption.flatMap(Host.fromString) match {
