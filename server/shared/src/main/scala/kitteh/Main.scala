@@ -26,8 +26,6 @@ object Main extends CrossPlatformIOApp {
 
   val usage = Console[IO].errorln("usage: ./kitteh host")
 
-  Network[IO].serverResource()
-
   def run(args: List[String]): IO[ExitCode] =
     args.headOption.flatMap(Host.fromString) match {
       case Some(host) => Server[IO](host).useForever
