@@ -282,9 +282,7 @@ object Server {
 
             // handle each request individually
             val stream: Stream[F, Stream[F, Nothing]] = requests map { client =>
-              val logging = client.remoteAddress.flatMap(isa =>
-                Logger[F].debug(s"accepting connection from $isa")
-              )
+              val logging = client.remoteAddress.flatMap(isa => Logger[F].debug(s"accepting connection from $isa"))
               val init = Concurrent[F].ref(State.empty[F, String])
 
               Stream.eval(logging *> init) flatMap { state =>
@@ -313,7 +311,7 @@ object Server {
                 // render all semantic errors as RESP.Error tokens
                 val submerged: Stream[F, RESP] = results evalMap {
                   case Left(err) =>
-                    Logger[F].error(s"reporting error: $err").as(RESP.String.Error(err.toString): RESP) // TODO
+                    Logger[F].error(s"reporting error: $err").as(RESP.String.Error(err.toString): RESP)   // TODO
 
                   case Right(resp) =>
                     Applicative[F].pure(resp)

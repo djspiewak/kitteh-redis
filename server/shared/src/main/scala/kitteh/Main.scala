@@ -19,7 +19,6 @@ package kitteh
 import cats.effect.std.Console
 import cats.effect.{ExitCode, IO}
 import com.comcast.ip4s.Host
-import fs2.io.net.Network
 import io.chrisdavenport.crossplatformioapp.CrossPlatformIOApp
 
 object Main extends CrossPlatformIOApp {
