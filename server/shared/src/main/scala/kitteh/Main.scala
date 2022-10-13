@@ -19,18 +19,15 @@ package kitteh
 import cats.effect.std.Console
 import cats.effect.{ExitCode, IO}
 import com.comcast.ip4s.Host
-import fs2.io.net.Network
 import io.chrisdavenport.crossplatformioapp.CrossPlatformIOApp
 
 object Main extends CrossPlatformIOApp {
 
   val usage = Console[IO].errorln("usage: ./kitteh host")
 
-  Network[IO].serverResource()
-
   def run(args: List[String]): IO[ExitCode] =
     args.headOption.flatMap(Host.fromString) match {
-      case Some(host) => Server[IO](host).useForever.as(ExitCode.Success)
-      case None       => usage.as(ExitCode.Error)
+      case Some(host) => Server[IO](host).useForever
+      case None => usage.as(ExitCode.Error)
     }
 }
